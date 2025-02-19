@@ -51,12 +51,11 @@ Then you should see the examples and be able to include the library in your proj
 
 This works like a standard Arduino library. Here's a minimal example:
 
-```
+```c
+#include "esp32notifications.h"
+
 // Create an interface to the BLE notification library at the top of your sketch
 BLENotifications notifications;
-
-// Start looking for a device connection
-notifications.begin("BLEConnection device name");
 
 // This callback will be called when a Bluetooth LE connection is made or broken.
 // You can update the ESP 32's UI or take other action here.
@@ -74,13 +73,18 @@ void onBLEStateChanged(BLENotifications::State state) {
 }
 
 // Setup a callback for when a notification arrives
-void onNotificationArrived(const ArduinoNotification * notification, Notification * rawData) {
+void onNotificationArrived(const ArduinoNotification * notification, const Notification * rawData) {
     Serial.println(notification->title);
 }
 
-// Register the callback to be informed when a notification arrives
-notifications.setConnectionStateChangedCallback(onBLEStateChanged);
-notifications.setNotificationCallback(onNotificationArrived);
+void setup() {
+  // Start looking for a device connection
+  notifications.begin("BLEConnection device name");
+
+  // Register the callback to be informed when a notification arrives
+  notifications.setConnectionStateChangedCallback(onBLEStateChanged);
+  notifications.setNotificationCallback(onNotificationArrived);
+}
 ```
 
 Note that the Espressif BLE libraries are very large, so you may need to increase your partition scheme to "Large" in the Arduino IDE.

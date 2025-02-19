@@ -8,6 +8,7 @@
 
 #include <string>
 #include <WString.h> // Arduino string
+#include <time.h>
 
 /**
  * Notification category, based on ANCS values, but could also be used for Android.
