@@ -30,12 +30,6 @@ static void setServiceSolicitation(class BLEAdvertisementData &advertisementData
 
 class MyServerCallbacks : public BLEServerCallbacks
 {
-private:
-	struct gatts_connect_evt_param
-	{														// @todo include from sdk/include/bt/esp_gatts_api.h
-		uint16_t conn_id;					/*!< Connection id */
-		esp_bd_addr_t remote_bda; /*!< Remote bluetooth device address */
-	} connect;
 
 public:
 	BLENotifications *instance;
@@ -48,12 +42,10 @@ public:
 	void onConnect(BLEServer *pServer, esp_ble_gatts_cb_param_t *param)
 	{
 		ESP_LOGI(LOG_TAG, "Device connected");
-		gatts_connect_evt_param *connectEventParam = (gatts_connect_evt_param *)param;
 		instance->client = new ANCSBLEClient(); // @todo memory leaks?
 		instance->client->setNotificationArrivedCallback(instance->cbNotification);
 		instance->client->setNotificationRemovedCallback(instance->cbRemoved);
-		// instance->client->setStackSize(50000);
-		::xTaskCreatePinnedToCore(&ANCSBLEClient::startClientTask, "ClientTask", 10000, new BLEAddress(connectEventParam->remote_bda), 5, &instance->client->clientTaskHandle, 0);
+		::xTaskCreatePinnedToCore(&ANCSBLEClient::startClientTask, "ClientTask", 10000, new BLEAddress(param->connect.remote_bda), 5, &instance->client->clientTaskHandle, 0);
 
 		delay(1000);
 
@@ -198,6 +190,8 @@ void BLENotifications::startAdvertising()
 	// Start advertising
 	pAdvertising->start();
 	isAdvertising = true;
+
+	ESP_LOGD(LOG_TAG, "Advertising started!");
 }
 
 #ifndef BLE_LIB_HAS_SERVICE_SOLICITATION

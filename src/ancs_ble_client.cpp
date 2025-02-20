@@ -41,7 +41,6 @@ static void notificationSourceNotifyCallback(
 		bool isNotify)
 {
 	ESP_LOGD(LOG_TAG, "notificationSourceNotifyCallback");
-
 	sharedInstance->onNotificationSourceNotify(pNotificationSourceCharacteristic, pData, length, isNotify);
 }
 
@@ -87,8 +86,12 @@ void ANCSBLEClient::setup(const BLEAddress *address)
 	pSecurity->setAuthenticationMode(ESP_LE_AUTH_REQ_SC_BOND);
 	pSecurity->setCapability(ESP_IO_CAP_IO);
 	pSecurity->setRespEncryptionKey(ESP_BLE_ENC_KEY_MASK | ESP_BLE_ID_KEY_MASK);
-	// Connect to the remove BLE Server.
-	pClient->connect(*address);
+	// Connect to the remote BLE Server.
+	if (!pClient->connect(*address))
+	{
+		ESP_LOGW(LOG_TAG, "Failed to connect to remote BLE server.");
+		return;
+	}
 
 	/** BEGIN ANCS SERVICE **/
 	// Obtain a reference to the service we are after in the remote BLE server.
@@ -106,7 +109,6 @@ void ANCSBLEClient::setup(const BLEAddress *address)
 		return;
 	}
 	// Obtain a reference to the characteristic in the service of the remote BLE server.
-
 	pControlPointCharacteristic = pAncsService->getCharacteristic(controlPointCharacteristicUUID);
 	if (pControlPointCharacteristic == nullptr)
 	{
@@ -120,6 +122,7 @@ void ANCSBLEClient::setup(const BLEAddress *address)
 		ESP_LOGW(LOG_TAG, "Failed to find characteristic UUID dataSourceCharacteristicUUID");
 		return;
 	}
+
 	const uint8_t v[] = {0x1, 0x0};
 	pDataSourceCharacteristic->registerForNotify(dataSourceNotifyCallback);
 	pDataSourceCharacteristic->getDescriptor(BLEUUID((uint16_t)0x2902))->writeValue((uint8_t *)v, 2, true);
@@ -173,7 +176,6 @@ void ANCSBLEClient::onDataSourceNotify(
 		size_t length,
 		bool isNotify)
 {
-
 	std::string message;
 
 	uint32_t messageId = pData[4];
@@ -268,7 +270,6 @@ void ANCSBLEClient::onNotificationSourceNotify(
 
 void ANCSBLEClient::performAction(uint32_t notifyUUID, uint8_t actionID)
 {
-
 	uint8_t uuid[4];
 	uuid[0] = notifyUUID;
 	uuid[1] = notifyUUID >> 8;
