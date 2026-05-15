@@ -711,11 +711,12 @@ void loop() {
     notifications.startAdvertising();
   }
 
-  if (redrawRequested && !vibrationActive) {
+  handleVibration();
+
+  if (redrawRequested && !vibrationActive && !vibrationRequested) {
     drawNotificationScreen();
   }
 
-  handleVibration();
   handleButtonPresses();
 
   delay(20);
