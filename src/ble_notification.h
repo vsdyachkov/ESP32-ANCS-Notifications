@@ -83,15 +83,17 @@ struct Notification
     std::string title;
     std::string message;
     std::string type;
-    uint32_t eventFlags; /**< Bitfield of ANCS::EventFlags flags. */
-    time_t time;
+    std::string positiveActionLabel;
+    std::string negativeActionLabel;
+    uint32_t eventFlags = 0; /**< Bitfield of ANCS::EventFlags flags. */
+    time_t time = 0;
     uint32_t uuid = 0;
     bool showed = false;
     bool isComplete = false;
     bool titleReceived = false;
     bool messageReceived = false;
-    NotificationCategory category; /**< If it is a call, social media, email, etc. */
-    uint8_t categoryCount;         /**< Number of other notifications in this category (ie badge number count). */
+    NotificationCategory category = CategoryIDOther; /**< If it is a call, social media, email, etc. */
+    uint8_t categoryCount = 0;                        /**< Number of other notifications in this category (ie badge number count). */
 };
 
 /**
@@ -104,6 +106,8 @@ struct ArduinoNotification
     String title;
     String message;
     String type;
+    String positiveActionLabel;
+    String negativeActionLabel;
     uint32_t eventFlags; /**< Bitfield of ANCS::EventFlags flags. */
     time_t time;
     uint32_t uuid = 0;
@@ -117,6 +121,8 @@ struct ArduinoNotification
         title = String(src.title.c_str());
         message = String(src.message.c_str());
         type = String(src.type.c_str());
+        positiveActionLabel = String(src.positiveActionLabel.c_str());
+        negativeActionLabel = String(src.negativeActionLabel.c_str());
         eventFlags = src.eventFlags;
         time = src.time;
         uuid = src.uuid;

@@ -20,6 +20,60 @@ const BLEUUID ancsServiceUUID("7905F431-B5CE-4E99-A40F-4B1E122D00D0");
 
 static ANCSBLEClient *sharedInstance;
 
+static int parseTwoDigits(const std::string &value, size_t offset)
+{
+	if (offset + 1 >= value.length())
+	{
+		return -1;
+	}
+	if (value[offset] < '0' || value[offset] > '9' || value[offset + 1] < '0' || value[offset + 1] > '9')
+	{
+		return -1;
+	}
+	return (value[offset] - '0') * 10 + (value[offset + 1] - '0');
+}
+
+static int parseFourDigits(const std::string &value, size_t offset)
+{
+	int high = parseTwoDigits(value, offset);
+	int low = parseTwoDigits(value, offset + 2);
+	if (high < 0 || low < 0)
+	{
+		return -1;
+	}
+	return high * 100 + low;
+}
+
+static time_t parseNotificationDate(const std::string &value)
+{
+	if (value.length() < 15 || value[8] != 'T')
+	{
+		return 0;
+	}
+
+	int year = parseFourDigits(value, 0);
+	int month = parseTwoDigits(value, 4);
+	int day = parseTwoDigits(value, 6);
+	int hour = parseTwoDigits(value, 9);
+	int minute = parseTwoDigits(value, 11);
+	int second = parseTwoDigits(value, 13);
+	if (year < 1970 || month < 1 || month > 12 || day < 1 || day > 31 || hour < 0 || hour > 23 ||
+			minute < 0 || minute > 59 || second < 0 || second > 59)
+	{
+		return 0;
+	}
+
+	tm notificationTime = {};
+	notificationTime.tm_year = year - 1900;
+	notificationTime.tm_mon = month - 1;
+	notificationTime.tm_mday = day;
+	notificationTime.tm_hour = hour;
+	notificationTime.tm_min = minute;
+	notificationTime.tm_sec = second;
+	notificationTime.tm_isdst = -1;
+	return mktime(&notificationTime);
+}
+
 static void dataSourceNotifyCallback(
 		BLERemoteCharacteristic *pDataSourceCharacteristic,
 		uint8_t *pData,
@@ -148,22 +202,24 @@ void ANCSBLEClient::retrieveExtraNotificationData(Notification &pending)
 	uuid[3] = notifyUUID >> 24;
 
 	bool notificationAlreadyInQueue = notificationQueue->contains(pending.uuid);
-	if (notificationAlreadyInQueue == false)
+	if (notificationAlreadyInQueue)
 	{
-		notificationQueue->addNotification(notifyUUID, pending, isIncomingCall(pending));
+		return;
 	}
-	else
-	{
-		Notification *notification = notificationQueue->getNotification(notifyUUID);
-		notification->isComplete = false;
-		notification->titleReceived = false;
-		notification->messageReceived = false;
-		notification->title.clear();
-		notification->message.clear();
-	}
+	notificationQueue->addNotification(notifyUUID, pending, isIncomingCall(pending));
 
 	const uint8_t vIdentifier[] = {0x0, uuid[0], uuid[1], uuid[2], uuid[3], ANCS::NotificationAttributeIDAppIdentifier};
 	pControlPointCharacteristic->writeValue((uint8_t *)vIdentifier, 6, true);
+	if ((pending.eventFlags & ANCS::EventFlagPositiveAction) != 0)
+	{
+		const uint8_t vPositiveLabel[] = {0x0, uuid[0], uuid[1], uuid[2], uuid[3], ANCS::NotificationAttributeIDPositiveActionLabel};
+		pControlPointCharacteristic->writeValue((uint8_t *)vPositiveLabel, 6, true);
+	}
+	if ((pending.eventFlags & ANCS::EventFlagNegativeAction) != 0)
+	{
+		const uint8_t vNegativeLabel[] = {0x0, uuid[0], uuid[1], uuid[2], uuid[3], ANCS::NotificationAttributeIDNegativeActionLabel};
+		pControlPointCharacteristic->writeValue((uint8_t *)vNegativeLabel, 6, true);
+	}
 	const uint8_t vTitle[] = {0x0, uuid[0], uuid[1], uuid[2], uuid[3], ANCS::NotificationAttributeIDTitle, 0x0, 0x10};
 	pControlPointCharacteristic->writeValue((uint8_t *)vTitle, 8, true);
 	const uint8_t vMessage[] = {0x0, uuid[0], uuid[1], uuid[2], uuid[3], ANCS::NotificationAttributeIDMessage, 0x0, 0x10};
@@ -191,6 +247,7 @@ void ANCSBLEClient::onDataSourceNotify(
 	}
 
 	Notification *notification = notificationQueue->getNotification(messageId);
+	bool visibleDataChanged = false;
 
 	switch (pData[5])
 	{
@@ -198,17 +255,37 @@ void ANCSBLEClient::onDataSourceNotify(
 		notification->type = message;
 		break;
 	case 0x1:
+		visibleDataChanged = notification->title != message;
 		notification->title = message;
 		notification->titleReceived = true;
 		break;
 	case 0x3:
+		visibleDataChanged = notification->message != message;
 		notification->message = message;
 		notification->messageReceived = true;
 		break;
+	case ANCS::NotificationAttributeIDPositiveActionLabel:
+		visibleDataChanged = notification->positiveActionLabel != message;
+		notification->positiveActionLabel = message;
+		break;
+	case ANCS::NotificationAttributeIDNegativeActionLabel:
+		visibleDataChanged = notification->negativeActionLabel != message;
+		notification->negativeActionLabel = message;
+		break;
+	case ANCS::NotificationAttributeIDDate:
+	{
+		time_t notificationTime = parseNotificationDate(message);
+		visibleDataChanged = notificationTime != 0 && notification->time != notificationTime;
+		if (notificationTime != 0)
+		{
+			notification->time = notificationTime;
+		}
+		break;
+	}
 	}
 	if (notification->titleReceived && notification->messageReceived && (!notification->title.empty() || !notification->message.empty()))
 	{
-		if (notificationCB && notification->isComplete == false)
+		if (notificationCB && (!notification->isComplete || visibleDataChanged))
 		{
 			const ArduinoNotification arduinoNotification = ArduinoNotification(*notification);
 			notificationCB(&arduinoNotification, notification);
@@ -254,6 +331,11 @@ void ANCSBLEClient::onNotificationSourceNotify(
 	}
 	else if (pData[0] == ANCS::EventIDNotificationAdded || pData[0] == ANCS::EventIDNotificationModified)
 	{
+		if (notificationQueue->contains(messageId))
+		{
+			return;
+		}
+
 		Notification pending;
 		pending.uuid = messageId;
 		pending.eventFlags = pData[1];
