@@ -2,6 +2,7 @@
 #define ESP32NOTIFICATIONS_H_
 
 #include <Arduino.h>
+#include <string>
 
 #include "ble_notification.h"
 
@@ -9,7 +10,6 @@
  * Arduino library for the ESP32, for receiving BLE notifications from another device.
  *
  * This class was designed with simplicity and ease-of-use in mind.
- * This library supports ESP32 debugging output: in the Arduino IDE, change Tools/Core Debug Level.
  */
 class BLENotifications
 {
@@ -81,6 +81,12 @@ private:
     class BLEServer *server;
     class ANCSBLEClient *client;
 
+#ifdef ENABLE_IOS_SETTINGS_PAIRING_HELPER
+    class BLEHIDDevice *pairingHidDevice;
+    void setupIOSSettingsPairingHelper();
+#endif
+
+    std::string localName;
     bool isAdvertising;
 
     friend class MyServerCallbacks; // Allow internal handlers to access the callbacks of the main class

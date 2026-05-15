@@ -1,12 +1,9 @@
 #include "ancs_notification_queue.h"
 #include <type_traits>
 
-static char LOG_TAG[] = "ANCSNotificationQueue";
-
 void ANCSNotificationQueue::addPendingNotification(const Notification pending)
 {
   pendingNotification.push(pending);
-  ESP_LOGD(LOG_TAG, "Add pending Notification, id: %d", pending.uuid);
 }
 
 bool ANCSNotificationQueue::pendingNotificationExists()
@@ -19,7 +16,6 @@ Notification ANCSNotificationQueue::getNextPendingNotification()
   assert(pendingNotification.size() > 0);
   Notification pending = pendingNotification.top();
   pendingNotification.pop();
-  ESP_LOGD(LOG_TAG, "Getting pending Notification %d", pending.uuid);
   return pending;
 }
 
@@ -49,7 +45,7 @@ std::map<uint32_t, Notification> *ANCSNotificationQueue::getNotificationList()
 bool ANCSNotificationQueue::contains(uint32_t uuid)
 {
   std::map<uint32_t, Notification>::iterator it = notificationList.find(uuid);
-  return (it != notificationList.end()) | (callingNotification.uuid != 0);
+  return (it != notificationList.end()) || (callingNotification.uuid == uuid);
 }
 
 Notification *ANCSNotificationQueue::getNotification(uint32_t uuid)

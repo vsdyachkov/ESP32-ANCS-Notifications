@@ -10,11 +10,7 @@
 #include "BLEUtils.h"
 #include "BLE2902.h"
 
-#include "esp_log.h"
-
-#include <Arduino.h> // Only for development
-
-static char LOG_TAG[] = "ANCSBLEClient";
+#include <Arduino.h>
 
 // Fixed service IDs for the Apple ANCS service
 const BLEUUID notificationSourceCharacteristicUUID("9FBF120D-6301-42D9-8C58-25E699A21DBD");
@@ -30,7 +26,6 @@ static void dataSourceNotifyCallback(
 		size_t length,
 		bool isNotify)
 {
-	ESP_LOGD(LOG_TAG, "dataSourceNotifyCallback");
 	sharedInstance->onDataSourceNotify(pDataSourceCharacteristic, pData, length, isNotify);
 }
 
@@ -40,7 +35,6 @@ static void notificationSourceNotifyCallback(
 		size_t length,
 		bool isNotify)
 {
-	ESP_LOGD(LOG_TAG, "notificationSourceNotifyCallback");
 	sharedInstance->onNotificationSourceNotify(pNotificationSourceCharacteristic, pData, length, isNotify);
 }
 
@@ -59,7 +53,6 @@ ANCSBLEClient::~ANCSBLEClient()
 
 void ANCSBLEClient::startClientTask(void *params)
 {
-	ESP_LOGD(LOG_TAG, "Starting client");
 	const BLEAddress *address = (BLEAddress *)params;
 	sharedInstance->setup(address);
 
@@ -69,7 +62,6 @@ void ANCSBLEClient::startClientTask(void *params)
 		if (queue->pendingNotificationExists())
 		{
 			Notification pending = queue->getNextPendingNotification();
-			ESP_LOGD(LOG_TAG, "retriveNotificationData: %d", pending.uuid);
 			sharedInstance->retrieveExtraNotificationData(pending);
 		}
 		delay(500);
@@ -78,18 +70,23 @@ void ANCSBLEClient::startClientTask(void *params)
 
 void ANCSBLEClient::setup(const BLEAddress *address)
 {
+#ifdef ENABLE_IOS_SETTINGS_PAIRING_HELPER
+	// Let iOS finish HID pairing/bonding before we connect back to its ANCS service.
+	delay(12000);
+#endif
+
 	BLEClient *pClient = BLEDevice::createClient();
-	BLEDevice::setEncryptionLevel(ESP_BLE_SEC_ENCRYPT);
 	BLEDevice::setSecurityCallbacks(new NotificationSecurityCallbacks()); // @todo memory leak?
 
 	BLESecurity *pSecurity = new BLESecurity();
-	pSecurity->setAuthenticationMode(ESP_LE_AUTH_REQ_SC_BOND);
-	pSecurity->setCapability(ESP_IO_CAP_IO);
+	pSecurity->setAuthenticationMode(ESP_LE_AUTH_BOND);
+	pSecurity->setCapability(ESP_IO_CAP_NONE);
+	pSecurity->setKeySize(16);
+	pSecurity->setInitEncryptionKey(ESP_BLE_ENC_KEY_MASK | ESP_BLE_ID_KEY_MASK);
 	pSecurity->setRespEncryptionKey(ESP_BLE_ENC_KEY_MASK | ESP_BLE_ID_KEY_MASK);
 	// Connect to the remote BLE Server.
 	if (!pClient->connect(*address))
 	{
-		ESP_LOGW(LOG_TAG, "Failed to connect to remote BLE server.");
 		return;
 	}
 
@@ -98,28 +95,24 @@ void ANCSBLEClient::setup(const BLEAddress *address)
 	BLERemoteService *pAncsService = pClient->getService(ancsServiceUUID);
 	if (pAncsService == nullptr)
 	{
-		ESP_LOGW(LOG_TAG, "Failed to find service UUID ancsServiceUUID.");
 		return;
 	}
 	// Obtain a reference to the characteristic in the service of the remote BLE server.
 	BLERemoteCharacteristic *pNotificationSourceCharacteristic = pAncsService->getCharacteristic(notificationSourceCharacteristicUUID);
 	if (pNotificationSourceCharacteristic == nullptr)
 	{
-		ESP_LOGW(LOG_TAG, "Failed to find characteristic UUID notificationSourceCharacteristicUUID");
 		return;
 	}
 	// Obtain a reference to the characteristic in the service of the remote BLE server.
 	pControlPointCharacteristic = pAncsService->getCharacteristic(controlPointCharacteristicUUID);
 	if (pControlPointCharacteristic == nullptr)
 	{
-		ESP_LOGW(LOG_TAG, "Failed to find characteristic UUID: controlPointCharacteristicUUID");
 		return;
 	}
 	// Obtain a reference to the characteristic in the service of the remote BLE server.
 	BLERemoteCharacteristic *pDataSourceCharacteristic = pAncsService->getCharacteristic(dataSourceCharacteristicUUID);
 	if (pDataSourceCharacteristic == nullptr)
 	{
-		ESP_LOGW(LOG_TAG, "Failed to find characteristic UUID dataSourceCharacteristicUUID");
 		return;
 	}
 
@@ -159,6 +152,15 @@ void ANCSBLEClient::retrieveExtraNotificationData(Notification &pending)
 	{
 		notificationQueue->addNotification(notifyUUID, pending, isIncomingCall(pending));
 	}
+	else
+	{
+		Notification *notification = notificationQueue->getNotification(notifyUUID);
+		notification->isComplete = false;
+		notification->titleReceived = false;
+		notification->messageReceived = false;
+		notification->title.clear();
+		notification->message.clear();
+	}
 
 	const uint8_t vIdentifier[] = {0x0, uuid[0], uuid[1], uuid[2], uuid[3], ANCS::NotificationAttributeIDAppIdentifier};
 	pControlPointCharacteristic->writeValue((uint8_t *)vIdentifier, 6, true);
@@ -188,30 +190,26 @@ void ANCSBLEClient::onDataSourceNotify(
 		message += (char)pData[i];
 	}
 
-	ESP_LOGD(LOG_TAG, "ID: %d raw message: %s type==%d", messageId, message.c_str(), pData[5]);
-
 	Notification *notification = notificationQueue->getNotification(messageId);
 
 	switch (pData[5])
 	{
 	case ANCS::NotificationAttributeIDAppIdentifier:
 		notification->type = message;
-		ESP_LOGD(LOG_TAG, "got type: %s", message.c_str());
 		break;
 	case 0x1:
 		notification->title = message;
-		ESP_LOGD(LOG_TAG, "got title: %s", message.c_str());
+		notification->titleReceived = true;
 		break;
 	case 0x3:
 		notification->message = message;
-		ESP_LOGD(LOG_TAG, "got message: %s", message.c_str());
+		notification->messageReceived = true;
 		break;
 	}
-	if (!notification->title.empty() && !notification->message.empty())
+	if (notification->titleReceived && notification->messageReceived && (!notification->title.empty() || !notification->message.empty()))
 	{
 		if (notificationCB && notification->isComplete == false)
 		{
-			ESP_LOGI(LOG_TAG, "got a full notification: %s - %s ", notification->title.c_str(), notification->message.c_str());
 			const ArduinoNotification arduinoNotification = ArduinoNotification(*notification);
 			notificationCB(&arduinoNotification, notification);
 		}
@@ -240,8 +238,6 @@ void ANCSBLEClient::onNotificationSourceNotify(
 
 	if (pData[0] == ANCS::EventIDNotificationRemoved)
 	{
-		ESP_LOGI(LOG_TAG, "notification removed: %d", messageId);
-
 		Notification *notification = notificationQueue->getNotification(messageId);
 
 		if (isIncomingCall(*notification))
@@ -256,9 +252,8 @@ void ANCSBLEClient::onNotificationSourceNotify(
 			removedCB(&arduinoNotification, notification);
 		}
 	}
-	else if (pData[0] == ANCS::EventIDNotificationAdded)
+	else if (pData[0] == ANCS::EventIDNotificationAdded || pData[0] == ANCS::EventIDNotificationModified)
 	{
-		ESP_LOGI(LOG_TAG, "notification added, type: %d", pData[2]);
 		Notification pending;
 		pending.uuid = messageId;
 		pending.eventFlags = pData[1];

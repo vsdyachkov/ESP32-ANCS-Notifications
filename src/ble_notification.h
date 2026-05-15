@@ -88,6 +88,8 @@ struct Notification
     uint32_t uuid = 0;
     bool showed = false;
     bool isComplete = false;
+    bool titleReceived = false;
+    bool messageReceived = false;
     NotificationCategory category; /**< If it is a call, social media, email, etc. */
     uint8_t categoryCount;         /**< Number of other notifications in this category (ie badge number count). */
 };
